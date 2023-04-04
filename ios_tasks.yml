@@ -1,0 +1,154 @@
+    - name: Error Handling
+      block:
+        # - name: Update admin password 
+        #   cisco.ios.ios_user:
+        #     name: admin
+        #     privilege: 15
+        #     password_type: secret 
+        #     update_password: always
+        #     configured_password: '{{ admin_password }}'
+        #   register: error_update_admin
+
+        # - name: Update enable password
+        #   cisco.ios.ios_config:
+        #     lines:
+        #     - enable secret {{ enable_password }}
+        #   register: error_enable_password
+
+        # - name: Update POLR password
+        #   cisco.ios.ios_config:
+        #     lines:
+        #     - password {{ last_resort_password }}
+        #     parents: line con 0 
+        #   register: error_polr_password
+
+        
+        - name: Run the config archive rollback role
+          include_role:
+            name: config_archive_rollback
+          vars:
+            timer: 15
+          register: error_idle  
+
+
+        - name: Remove current access-list 20
+          cisco.ios.ios_config:
+            lines:
+            - no access-list 20
+            - no ip access-list standard 20
+          register: error_remove_access_list
+
+
+#        - name: Push config
+#          cisco.ios.ios_acls:
+#            config:
+#            - afi: ipv4
+#              acls:
+#              - name: 20
+#                acl_type: standard
+#                aces:
+#                - grant: permit
+#                  source:
+#                    address: 139.65.136.0
+#                    wildcard_bits: 0.0.3.255
+#                  sequence: 10
+#                - grant: permit
+#                  source:
+#                    address: 139.65.140.0
+#                    wildcard_bits: 0.0.3.255
+#                  sequence: 20
+#                - grant: deny
+#                  source:
+#                    any: true
+#                  sequence: 30
+#                  log:
+#                    set: true
+#                
+#            state: replaced
+
+
+        - name: Push config
+          cisco.ios.ios_config:
+            lines: 
+              - 10 permit 139.65.136.0 0.0.3.255
+              - 20 permit 139.65.140.0 0.0.3.255
+              - 30 deny   any log
+            parents: ip access-list standard 20
+          register: error_push_access_list
+
+
+        - name: Reset connection
+          meta: reset_connection
+
+        - name: Run the config archive rollback role
+          include_role:
+            name: config_archive_rollback
+            tasks_from: confirm_change
+          register: error_confirm_change
+
+        - name: Save Config
+          ios_config:
+            save_when: always
+
+        - name: Update CSV File When Successful 
+          lineinfile:
+            path: "../ACL20_report/Report-{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+            insertafter: EOF
+            create: yes          
+            line: "{{ inventory_hostname }},{{ ansible_host }},Successful"       
+          throttle: 1
+
+          delegate_to: localhost        
+
+      rescue:
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_update_admin | string }}"
+          when: error_update_admin.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_enable_password | string }}"
+          when: error_enable_password.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_polr_password | string }}"
+          when: error_polr_password.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_remove_access_list | string }}"
+          when: error_remove_access_list.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_push_access_list | string }}"
+          when: error_push_access_list.msg is defined          
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_confirm_change | string }}"
+          when: error_confirm_change.msg is defined
+
+        - name: Get Error Revert Idle
+          set_fact:
+            failed_reason: "{{ error_idle | string | regex_search('ansible.module_utils.connection.ConnectionError:+(.*?)\\\\r') | regex_replace('\\\\r', '') | regex_replace('ansible.module_utils.connection.ConnectionError:', '') }}"
+          when: error_idle.msg is defined
+
+        - name: Update CSV File When Failed 
+          lineinfile:
+            path: "../ACL20_report/Report-{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+            insertafter: EOF 
+            create: yes        
+            line: "{{ inventory_hostname }},{{ ansible_host }},Failed,Error: \"{{ failed_reason }}\""       
+          throttle: 1
+          delegate_to: localhost
+
+        - name: Rollback the change
+          cisco.ios.ios_config:
+            lines:
+              - configure confirm
+
+          ignore_errors: yes

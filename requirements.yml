@@ -1,0 +1,4 @@
+---
+collections:
+  - cisco.nxos
+  - cisco.ios

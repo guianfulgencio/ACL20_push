@@ -1,0 +1,110 @@
+    - name: Error Handling
+      block:
+#        - name: Update admin password 
+#          cisco.nxos.nxos_user:
+#            name: test
+#            update_password: always
+#            configured_password: '{{ admin_password }}'
+#          register: error_update_admin
+        
+#        - name: Create checkpoint
+#          cisco.nxos.nxos_command:
+#            commands:
+#            - clear checkpoint database
+#            - checkpoint ACL20
+#          register: error_idle  
+        
+#        - name: Configure rollback timer
+#          cisco.nxos.nxos_config:
+#            src: nxos_enable_rollback_timer.cfg
+
+        - name: Remove ACL20
+          cisco.nxos.nxos_config:
+            lines:
+            - no ip access-list 20
+            
+          
+          register: error_push_access_list
+
+
+        - name: Change ACL20
+          cisco.nxos.nxos_config:
+            lines:
+            - statistics per-entry
+            - 10 permit ip 139.65.136.0/22 any
+            - 20 permit ip 139.65.140.0/22 any
+            - 30 deny ip any any log
+            parents: ip access-list 20
+          
+          register: error_remove_access_list
+
+#        - name: Reset connection
+#          meta: reset_connection
+#
+#        - name: Run the config archive rollback role
+#          include_role:
+#            name: config_archive_rollback
+#            tasks_from: confirm_change
+#          register: error_confirm_change
+#
+#        - name: Save Config
+#          ios_config:
+#            save_when: always
+#
+        - name: Update CSV File When Successful 
+          lineinfile:
+            path: "../ACL20_report/Report-{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+            insertafter: EOF
+            create: yes          
+            line: "{{ inventory_hostname }},{{ ansible_host }},Successful"       
+          throttle: 1
+
+          delegate_to: localhost        
+
+      rescue:
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_update_admin | string }}"
+          when: error_update_admin.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_enable_password | string }}"
+          when: error_enable_password.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_polr_password | string }}"
+          when: error_polr_password.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_remove_access_list | string }}"
+          when: error_remove_access_list.msg is defined
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_push_access_list | string }}"
+          when: error_push_access_list.msg is defined          
+
+        - name: Get Error Access Port
+          set_fact:
+            failed_reason: "{{ error_confirm_change | string }}"
+          when: error_confirm_change.msg is defined
+
+        - name: Get Error Revert Idle
+          set_fact:
+            failed_reason: "{{ error_idle | string | regex_search('ansible.module_utils.connection.ConnectionError:+(.*?)\\\\r') | regex_replace('\\\\r', '') | regex_replace('ansible.module_utils.connection.ConnectionError:', '') }}"
+          when: error_idle.msg is defined
+
+        - name: Update CSV File When Failed 
+          lineinfile:
+            path: "../ACL20_report/Report-{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+            insertafter: EOF 
+            create: yes        
+            line: "{{ inventory_hostname }},{{ ansible_host }},Failed,Error: \"{{ failed_reason }}\""       
+          throttle: 1
+          delegate_to: localhost
+
+          ignore_errors: yes

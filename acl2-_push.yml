@@ -1,0 +1,67 @@
+trigger:
+  none
+variables:
+- group: production_passwords
+- group: ado-pat-git-pipeline
+
+pool:
+  name: ITC-ITSD-Ansible-UK
+
+stages:
+- stage: Install_dependencies
+  jobs:
+  - job: Python_dependencies
+    steps:
+    - checkout: self
+      persistCredentials: true
+      clean: true
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |  
+          cd ..
+          rm -rf ACL20_report
+          git clone https://$(ado_pat_username):$(ado_pat_key)@dev.azure.com/chevron/ITC-ITSD-AnsibleNetworkAzure/_git/ACL20_report
+          ls -la
+      displayName: 'Clone report repo'
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |  
+          ansible-galaxy collection install -r requirements.yml -c --force-with-deps
+          
+          
+          
+      displayName: 'Install required collections'
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |  
+          ansible-galaxy install -i -c --force git+https://$(ado_pat_username):$(ado_pat_key)@dev.azure.com/chevron/TPS-ITC-AnsibleNetwork/_git/config_archive_rollback
+      displayName: 'Run Galaxy install for required role(s)'
+    
+    - task: Ansible@0
+      timeoutInMinutes: 150
+      inputs:
+        ansibleInterface: 'agentMachine'
+        playbookPathOnAgentMachine: 'acl20_push_playbook.yml'
+        inventoriesAgentMachine: 'file'
+        inventoryFileOnAgentMachine: '$(inventory_file)'
+        args: '-e "ansible_user=$(ssh_user) ansible_password=$(ssh_password) last_resort_password=$(last_resort_password) enable_password=$(enable_password) admin_password=$(admin_password_cisco)" -vvv --forks 50'
+        failOnStdErr: false
+    
+    - task: Bash@3
+      inputs: 
+        targetType: 'inline'
+        script: |
+          cd ../ACL20_report
+          git config --global user.email "svc-snow-ado-na@chevron.onmicrosoft.com"
+          git config --global user.name "svc-snow-ado-na"
+          git status
+          git add .
+          git commit -m "svc rendered configs are added"
+          git push origin
+      displayName: 'Merge with master and update repo'

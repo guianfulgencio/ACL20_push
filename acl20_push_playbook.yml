@@ -1,0 +1,8 @@
+- name: ACL20 push
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  tasks:
+    - include_tasks: "{{ ansible_network_os }}_tasks.yml"
+
